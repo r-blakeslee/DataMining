@@ -1,0 +1,340 @@
+---
+title: "HW1"
+output: github_document
+date: "2023-01-17"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+
+library(knitr)
+library(caret)
+library(rsample)
+library(modelr)
+library(tidyverse)
+library(ggplot2)
+library(readr)
+```
+
+
+## Question 1
+### What is the best day of the week to fly, and does this change by airline?
+
+```{r, include = FALSE}
+airline = read_csv("ABIA.csv")
+summary(airline)
+
+
+```
+
+
+```{r, echo = FALSE}
+x = str_wrap("From this graph, we can see that the departure delay is fairly similar across all days of the week.  It is slightly worse Tuesday and Saturday, but nothing overly alarming.  It does seem that American Airlines has significantly higher departure delays on Saturdays.", 80)
+ggplot(airline, aes(x = DayOfWeek, y = DepDelay, color = UniqueCarrier)) + geom_point() + xlab("Day of the Week") + ylab("Departure Delay") + ggtitle("Departure Delay by the Day of the Week (colored by Airline)") + labs(caption = x)
+
+
+```
+
+
+```{r, echo = FALSE}
+
+library(dplyr)
+y = str_wrap("Similarly to departure delays, we can see that the arrival delay is fairly similar across all days of the week.  It is slightly worse Tuesday and Saturday, but nothing overly apparent.  American Airlines also has significantly higher arrival delays on Saturdays than any other airline.", 80)
+ggplot(airline, aes(x = DayOfWeek, y = ArrDelay, color = UniqueCarrier)) +geom_point() + xlab("Day of Week") + ylab("Arrival Delay") + ggtitle("Arrival Delay by Day of Week (Colored by Airline)") + labs(caption = y)
+
+
+```
+
+```{r, echo = FALSE}
+avg_air = airline %>%
+  group_by(DayOfWeek, UniqueCarrier) %>%
+  summarise(dep_delay = mean(DepDelay), arr_delay = mean(ArrDelay), avg_delay = mean(arr_delay + dep_delay))
+
+z = str_wrap("When we look at the average total delay, we can see that more airlines have delays on Tuesdays, but there is not much else we can reason from this graph", 80)
+
+ggplot(avg_air, aes(x = DayOfWeek, y = avg_delay, color = UniqueCarrier)) + geom_point() + xlab("Day of the Week") + ylab("Average Total Delay (Including Arrival and Departure") + ggtitle("Average Delay by the Day of the Week (colored by Airline)") + labs(caption = z)
+
+
+
+```
+
+Overall, it seems as though Tuesdays and Saturdays experience slightly higher delays than average, and that American Airlines experiences larger delays on Saturdays. 
+
+## Question 2
+
+
+
+
+```{r, include = FALSE}
+
+## read in data for 2
+
+olympics = read_csv("olympics_top20.csv")
+
+```
+
+### Part a
+
+The 95% of female heights across all athletics events is 183 centimeters.
+
+
+```{r, include = FALSE}
+
+##2a
+
+oly_w_a = olympics %>%
+  filter(sex == "F", sport == "Athletics")
+quantile(oly_w_a$height, .95)
+  
+
+```
+
+### Part b
+
+Rowing Women's Coxed Fours had the highest standard deviation in height (10.865)
+
+```{r, include = FALSE}
+## 2b
+oly_sd = olympics %>% 
+  filter(sex == "F") %>%
+  group_by(event) %>%
+  summarise(sd_height = sd(height)) 
+
+oly_sd[order(-oly_sd$sd_height),]
+
+
+```
+### Part c
+
+In general, the average age of swimmers across genders has gradually increased over the years.  However, when the sport was first included in the olympics, it only was for males, and the average age dipped sharply when females were added to the sport. 
+
+```{r, echo = FALSE}
+olympic_swim = olympics %>%
+  filter(sport == "Swimming")%>%
+  group_by(sex, year) %>%
+  summarise(average_age = mean(age))
+
+ggplot(olympic_swim, aes(x = year, y = average_age, color = sex)) + geom_line()
+
+
+```
+
+## Question 3
+
+### Information for trim = 350
+
+
+```{r, echo = FALSE}
+sclass = read_csv("sclass.csv")
+sclass350 = sclass %>%
+  filter(trim == "350")
+sclass350_split =  initial_split(sclass350, prop=0.8)
+sclass350_train = training(sclass350_split)
+sclass350_test  = testing(sclass350_split)
+
+```
+
+```{r, include = FALSE}
+set.seed(123)
+## Attempt for loop
+k_vec= c(2:332)
+knnk = list()
+output = list()
+rmse_vec = c()
+
+## for loop trim = 350
+
+for (i in 2:length(k_vec)){
+  knnk[[i]] = knnreg(price~mileage, data = sclass350_train, k =  k_vec[i])
+output[i] = sclass350_test %>%
+  mutate(Price_Pred = predict(knnk[[i]], sclass350_test))
+ ##sclass350_test = sclass350_test %>%
+ ## mutate(Price_pred = predict(knnk, sclass350_test))
+rmse_vec[i] = modelr::rmse(knnk[[i]], sclass350_test)
+}
+
+k_vec
+rmse_vec
+plot(k_vec, rmse_vec)
+output
+my_data = data.frame(k_vec, rmse_vec)
+my_data
+min(my_data$rmse_vec)
+
+```
+
+
+
+```{r, echo = FALSE}
+## 350 trim - k vs. RMSE plot 
+
+plot(k_vec, rmse_vec)
+
+```
+
+
+
+```{r, include = FALSE}
+
+## plot for k = 10 
+
+knn10 = knnreg( price ~ mileage, data=sclass350_train, k=10)
+
+
+## Predictions Knn10
+
+sclass350pred_test = sclass350_test %>%
+  mutate(Price_pred = predict(knn10, sclass350_test))
+
+##RMSE KNN10
+modelr::rmse(knn10, sclass350pred_test)
+
+## Plot KNN10
+
+p_test = ggplot(data = sclass350pred_test) + 
+  geom_point(mapping = aes(x = mileage, y = price), alpha=0.2) + 
+  ylim(7000, 20000)
+p_test
+
+
+```
+
+```{r, echo = FALSE}
+# now add the predictions
+p_test + geom_line(aes(x = mileage, y = Price_pred), color='red', size=1.5)
+```
+### trim = 65
+
+```{r, include = FALSE}
+
+## data split for 65 AMG 
+sclass
+sclass65 = sclass %>%
+  filter(trim == "65 AMG")
+sclass65_split =  initial_split(sclass65, prop=0.8)
+sclass65_train = training(sclass65_split)
+sclass65_test  = testing(sclass65_split)
+
+```
+
+
+
+```{r, include = FALSE}
+## for loop for 65 AMG
+
+set.seed(123)
+## Attempt for loop
+
+k_vec65= c(2:17)
+knnk65 = list()
+output65 = list()
+rmse_vec65 = c()
+
+for (i in 2:length(k_vec65)){
+  knnk65[[i]] = knnreg(price~mileage, data = sclass65_train, k =  k_vec65[i])
+output65[i] = sclass65_test %>%
+  mutate(Price_Pred = predict(knnk65[[i]], sclass65_test))
+rmse_vec65[i] = modelr::rmse(knnk65[[i]], sclass65_test)
+}
+
+k_vec65
+rmse_vec65
+plot(k_vec65, rmse_vec65)
+
+my_data65 = data.frame(k_vec65, rmse_vec65)
+my_data65
+min(my_data65$rmse_vec)
+
+```
+The minimum RMSE for the AMG 65 trim is 18150.36 at k = 13. 
+
+### Plot for RMSE vs K, 65 AMG 
+
+```{r, echo = FALSE}
+plot(k_vec65, rmse_vec65)
+```
+
+### Plot for predictions based on mileage, including p-value
+
+```{r, include = FALSE}
+
+## Manual calculation for k = 13
+
+knn13 = knnreg( price ~ mileage, data=sclass65_train, k=13)
+
+
+## Predictions Knn13
+
+sclass65pred_test = sclass65_test %>%
+  mutate(Price_pred = predict(knn13, sclass65_test))
+
+##RMSE KNN13
+modelr::rmse(knn13, sclass65pred_test)
+
+## Plot KNN13
+
+p_test = ggplot(data = sclass65pred_test) + 
+  geom_point(mapping = aes(x = mileage, y = price), alpha=0.2) 
+p_test
+```
+
+```{r, echo = FALSE}
+# now add the predictions
+p_test + geom_line(aes(x = mileage, y = Price_pred), color='red', size=1.5)
+
+```
+
+The 65 AMG trim yields a larger optimal value for K.  I would predict that this is because there are less observations of the 65 AMG trim, so it is more difficult to find groupings with a smaller number of neighbors.  There are for more observations of the 350 trim, and so it takes a smaller number of neighbors to minimize the RMSE. 
+
+
+```{r,include = FALSE}
+
+## This code is the first attempt - rather than go by hand until I found the minimum I decided to use a for loop
+## KNN 
+##KNN2
+knn2 = knnreg( price ~ mileage, data=sclass350_train, k=2)
+
+
+## Predictions Knn2
+
+sclass350_test = sclass350_test %>%
+  mutate(Price_pred = predict(knn2, sclass350_test))
+
+##RMSE KNN2
+modelr::rmse(knn2, sclass350_test)
+
+## KNN 
+##KNN20
+knn20 = knnreg( price ~ mileage, data=sclass350_train, k=20)
+
+
+## Predictions Knn20
+
+sclass350_test = sclass350_test %>%
+  mutate(Price_pred = predict(knn20, sclass350_test))
+
+##RMSE KNN2
+modelr::rmse(knn20, sclass350_test)
+
+
+## KNN 
+##KNN50
+knn50 = knnreg( price ~ mileage, data=sclass350_train, k=50)
+
+
+## Predictions Knn2
+
+sclass350_test = sclass350_test %>%
+  mutate(Price_pred = predict(knn50, sclass350_test))
+
+##RMSE KNN2
+modelr::rmse(knn50, sclass350_test)
+
+```
+
+
+```{r ref.label=knitr::all_labels(), echo=TRUE, eval=FALSE}
+```
+
+
