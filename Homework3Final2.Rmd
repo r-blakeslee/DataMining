@@ -1,0 +1,427 @@
+---
+title: "Homework 3"
+authors: "Reilly Blakeslee, Daniil Deych, Alex Mykietyn"
+output: github_document
+date: "2023-03-20"
+---
+
+```{r setup, include=FALSE}
+
+
+library(tidyverse)
+library(mosaic)
+library(foreach)
+library(modelr)
+library(rsample)
+library(knitr)
+
+```
+
+# Question 1
+
+1. Simply running "Crime" on "Police" regression to infer causality ignores the common correlation vs causation fallacy. It isn't unreasonable to conclude that high crime places would warrant high amounts of police, in which case the regression would suggest that high police numbers result in high crime. Obviously, that wouldn't be the case.
+
+2. The reason the suggested regression above will provide false results is because of the inability to observe the counter-factual, since it isn't likely to observe low crime areas that would have large amounts of police and vice versa. That is why the researchers had to get creative and try to find examples that would somehow mimic such counter factual. 
+  What they came up with is a pseudo counter-factual case of when Washington DC would add significant amounts of police that wouldn't be warranted by the current crime rates in order to monitor any potential terrorist activity. Because the extra police presence wasn't there due to the rise in crime, this research could be seen as deterministic of the causal relationship between crime and police presence.
+  The table 2 of the research paper provides the results of such approach. The column of interest is the second one, as it controls for the Metro ridership (reason for it is answered in Question 3)
+  According to the findings on high alert days (days with increased police presence due to high terrorist alert) there is a significant (on 5% level) drop in total number of daily crimes. On average the total number crimes drops by 6.046 crimes.
+
+3. The reason why the researchers had to control for Metro ridership is because the concern was that it is possible that on high alert days the number of potential crime victims was lower than on other typical days. Controlling for Metro ridership is how the researchers solved that problem. The thinking was that if high alert days would keep people inside their homes, then that would be reflected by the number of people riding the Metro. So, after controlling for that, the researchers still found significant reduction in crime with increased police presence that wasn't there because the crime rates have gone up. This kind of thinking is what led to conclude that there is a potential causal relationship between high police presence and lower crime rates.
+
+4. Table 4 creates a further distinction in crime levels between parts of Washington DC, where there was greater police presence and the rest of the city. The dummy variable "District 1" in the model breaks down the data between the data points that belong to National Mall area (District 1) and the rest.
+Looking at the first column, the coefficients listed describe how the crime level changes on high alert days separated by geographical dummy variable. The results show that in the National Mall area, where police presence was higher than everywhere else in Washington DC, the total number of crimes dropped by 2.621, and the finding was significant on a 1% level.
+  Everywhere else in DC (dummy variable = 0) the change in crime was not significant, suggesting that the increased police presence in District 1 did not have any impact on crime outside the National Mall area.
+  All of the above results were controlled for the Metro ridership.
+
+# Question 2
+
+
+```{r setup2, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(rpart)
+
+library(rpart.plot)
+library(rsample) 
+library(dplyr)
+library(randomForest)
+library(lubridate)
+library(modelr)
+library(gbm)
+library(pdp)
+library(rmarkdown)
+library(ggplot2)
+dengue <- read_csv("dengue.csv")
+dengue2 <- dengue %>% filter(is.na(dengue$max_air_temp_k) == FALSE)  %>% 
+  filter(is.na(precipitation_amt) == FALSE)
+dengue2$season = factor(dengue2$season)
+dengue2$city = factor(dengue2$city)
+# training and testing sets
+set.seed(55)
+dengue_split = initial_split(dengue2)
+dengue_train = training(dengue_split)
+dengue_test = testing(dengue_split)
+#CART Tree
+dengue_tree1 <- rpart(total_cases ~ season + city + precipitation_amt + air_temp_k +  dew_point_temp_k + specific_humidity + tdtr_k, data=dengue_train,
+                      control = rpart.control(cp = 0.0001, minsplit=10))
+dengue_tree2 <- prune(dengue_tree1, 
+                      cp= dengue_tree1$cptable[which.min(dengue_tree1$cptable[,"xerror"]),"CP"])
+#Random Forest
+dengue_forest = randomForest(total_cases ~ season + city + precipitation_amt + air_temp_k + 
+                               dew_point_temp_k + specific_humidity + tdtr_k,
+                             data=dengue_train, importance = TRUE)
+#Boosted Tree
+dengue_boost = gbm(total_cases ~ season + city + precipitation_amt +
+                      air_temp_k + dew_point_temp_k + specific_humidity + tdtr_k,
+                    data=dengue_train,
+                    interaction.depth=18, n.trees=1000, shrinkage=.001)
+#Calculate RMSE
+CART_RMSE = modelr::rmse(dengue_tree2, dengue_test)
+forest_RMSE = modelr::rmse(dengue_forest, dengue_test)
+boost_RMSE = modelr::rmse(dengue_boost, dengue_test)
+```
+
+## Tree Modelling Dengue Fever
+
+We begin by selecting the independent variables season, city, precipitation, air temperature, specific humidity, dew point and temperature range. Other variables were excluded due to similarity with chosen variables or incomplete data.
+
+## CART Tree
+Next we make grow a CART tree keeping a minimum of 10 observations in each leaf and prune it back.
+
+```{r 0, echo=FALSE}
+rpart.plot(dengue_tree2, type=4, digits=-5, extra=1)
+```
+
+
+
+## Results
+Here we use the test set to calculate our estimated RMSE
+
+```{r 1}
+CART_RMSE
+forest_RMSE
+boost_RMSE
+```
+We note that all three methods yield very similar RMSE, this indicates that all three our relatively similar in their predictive value. Since the boosting model technically had the lowest RMSE, we will use this model for our partial dependency plots.
+
+## Partial Dependencies
+Below we have the partial dependencies with respect to specific humidity, precipitation and season.
+```{r 2, echo=FALSE}
+p1 = pdp::partial(dengue_boost, pred.var = 'specific_humidity', n.trees=1000)
+ggplot(p1) + geom_point(mapping=aes(x=specific_humidity, y=yhat))
+```
+
+The specific humidity appears to have little effect on cases and any effect it does have is inconsistent. Low predictions around a humidity of 18 is possibly a real effect as a substantial portion of data falls in this range but high predictions around a humidity of 19-20 are more likely to be noise.
+
+```{r 3, echo=FALSE}
+p2 = pdp::partial(dengue_boost, pred.var = 'precipitation_amt', n.trees=1000)
+ggplot(p2) + geom_point(mapping=aes(x=precipitation_amt, y=yhat))
+```
+
+The precipitation plot indicates little to no effect on the number of cases. The variation at low levels is almost certainly our model picking up noise.
+
+```{r 4, echo=FALSE}
+p3 = pdp::partial(dengue_boost, pred.var = 'season', n.trees=1000)
+ggplot(data=p3, aes(x=season, y=yhat)) +
+  geom_bar(stat="identity")+
+  theme_minimal()
+```
+
+The above bar plot shows that summer and winter are the worst seasons for dengue, followed by spring, followed by fall. It is unclear why two opposite seasons would have the highest expected cases, but there is likely something in the fall related to human activity or mosquito breeding that inhibits dengue cases.
+
+
+
+
+# Question 3
+## Green Buildings Prediction
+
+### Using basic regression and step functions
+
+For the purposes of this model, we chose to include 12 elements/element combinations for our prediction of revenue.  The most important to answer the question is green rating, which tells if the building in question either LEED- or EnergyStar-certified.  We also chose to include variables measuring utility cost, as well as if those costs are placed on the tenant or the landlord.  We declined to include rent and leasing rate because our outcome variable, revenue, is the product of those two variables.  As such, including them in the model as independent variables would result in perfect multicollinearity.  We also looked at measures such as the age, renovations, and amenities near the building.  The initial lm model that provided reasonable RMSE was: 
+
+$Revenue_i$ =  $\beta_0$ + $\beta_1BuildingSize$ + $\beta_2EmploymentGrowth$ + $\beta_3Age$ + $\beta_4Renovated$ + $\beta_5Renovated*Age$ + $\beta_6GreenRating$ + $\beta_7Amenitie$s + $\beta_8DaysUtilitesUsed$ + $\beta_9GasCost$ + $\{beta_10}ElectricityCost$ + $\beta_{11}UtilitiesPaidBy $
+
+```{r, include = FALSE}
+gb = read_csv("greenbuildings.csv")
+gb = drop_na(gb)
+gb = gb %>%
+  mutate(revenue = leasing_rate*Rent)
+
+
+
+# Split into training and testing sets
+gb_split = initial_split(gb, prop = 0.8)
+gb_train = training(gb_split)
+gb_test = testing(gb_split)
+
+```
+
+Starting with this base model, we measured the RMSE using a training/test split on the data.  Then, in order to test different variations of the model, we used step() to measure various interactions on the data.  The coefficients that were significant and therefore included in the model are shown below, as well as their coefficients.  The RMSE of this model is lower than just the base model, but it still seems as though we could do better. In order to test this, we move into forest and boosted models. 
+
+```{r, include = FALSE}
+
+# baseline medium model with 12 main effects
+lm_medium = lm(revenue ~ size + empl_gr + stories + age + renovated + age*renovated + green_rating + amenities + total_dd_07 - Gas_Costs - 
+                 Electricity_Costs + net, data = gb_train)
+
+
+
+
+# stepwise selection
+# note that we start with a reasonable guess
+lm_step = step(lm_medium, 
+			scope=~(.)^2)
+# the scope statement says:
+# "consider all two-way interactions for everything in lm_medium (.)
+
+# what variables are included?
+
+```
+
+```{r, echo = FALSE}
+getCall(lm_step)
+coef(lm_step)
+
+med_error = rmse(lm_medium,gb_test)
+step_error = rmse(lm_step, gb_test)
+
+```
+### Using Tree/Boosted Models
+
+In order to use the tree modelling, we measure a random forest model using the same base model that we measured above.  We also tested a boosted model with an interaction depth of 4 and 200 trees.  From these models, it is clear that the model with the lowest RMSE is the random forest model.  A table showing the RMSE of each prediciton method is shown below.  
+
+```{r forest, include = FALSE}
+##install.packages("gbm")
+library(gbm)
+urlPackage <- "https://cran.r-project.org/src/contrib/Archive/randomForest/randomForest_4.6-12.tar.gz"
+##install.packages(urlPackage, repos=NULL, type="source") 
+library(randomForest)
+
+forest_error <- list()
+boost_error <- list()
+
+for (i in 1:2){
+rforest <- randomForest(revenue ~ size + empl_gr + stories + age + renovated + age*renovated + green_rating + amenities + total_dd_07 - Gas_Costs - 
+                 Electricity_Costs + net, data = gb_train, importance = TRUE)
+  
+  forest_error[[i]] <- rmse(rforest, gb_test)
+  
+
+boost <- gbm(revenue ~ size + empl_gr + stories + age + renovated + age*renovated + green_rating + amenities + total_dd_07 - Gas_Costs - 
+                 Electricity_Costs + net, data = gb_train,
+                 interaction.depth= 4, n.trees=200, shrinkage=.05)
+  
+  
+ boost_error[[i]] <- rmse(boost, gb_test)
+}
+
+rmse_forest <- round(mean(unlist(forest_error)), 2)
+rmse_boost <- round(mean(unlist(boost_error)), 2)
+
+```
+
+
+```{r, echo = FALSE}
+library(knitr)
+my_data = data.frame(med_error, step_error, rmse_forest, rmse_boost)
+
+
+kable(my_data )
+
+
+```
+
+### Partial Dependence - The Importance of the Green Rating
+
+From this plot, it does appear as though green rating does cause an increase in revenue - however, a rating of 1 only increases revenue about $100 from a rating of 0, so it is clearly not the most important variables.
+
+``` {r, echo = FALSE, warning=FALSE, message=FALSE}
+
+library(pdp)
+p = pdp::partial(rforest, pred.var = 'green_rating', las = 1)
+
+plot(p,type = "l", xlab = "Green Rating", ylab = "Revenue", main = "Predicted Revenue by Green Rating")
+
+```
+
+
+
+The following variable importance plot helps us measure which variables are very important in terms of prediction.  In terms of increasing the RMSE, age, size, employment growth, and days that utlities were used are very important to predict this model.  We can also see that green rating is one of the less important prediction variables. 
+
+### Conclusion
+
+From these test, it seems as though the forest model provided the best RMSE in terms of of overall revenue prediction.  The green rating of a building does not impact the revenue very much at all. 
+
+
+
+``` {r, echo = FALSE, warning=FALSE, message=FALSE}
+varImpPlot(rforest)
+```
+# Question 4
+
+```{r, include=FALSE}
+
+# Install and load necessary packages
+
+library(ggplot2)
+library(maps)
+library(ggmap)
+library(maptools)
+library(rgdal)
+library(tidyverse)
+library(rpart)
+library(rpart.plot)
+library(rsample) 
+library(dplyr)
+library(randomForest)
+library(lubridate)
+library(modelr)
+library(gbm)
+library(pdp)
+library(MASS)
+library(readr)
+library(ggplot2)
+library(reshape2)
+library(maps)
+library(mapdata)
+CAhousing <- read_csv("CAhousing.csv")
+```
+To find our best predictive model, we elected to use three different methods. Since our total number of features isn't that high - only 9 after standardizing by household. For that reason some version of a tree model is likely to work best.
+
+To test that approach we also included a linear model to compare against.
+
+The first model we attempt is a Random Forest Model, which we then compare to the General Boosted Regression approach.
+
+## Random Forest Model
+
+```{r, echo=FALSE}
+#Creating variables demonstrating averages of statistics per household
+colnames(CAhousing)[c(1, 2)] <- c("long", "lat")
+CAH <- CAhousing %>%
+  mutate(avg_rooms = totalRooms/households, 
+         avg_bedrooms = totalBedrooms/households,
+         avg_house_pop = population/households) 
+#split data
+CAH_split = initial_split(CAH)
+CAH_train = training(CAH_split)
+CAH_test = testing(CAH_split)
+CAH_forest = randomForest(medianHouseValue ~ housingMedianAge + medianIncome + 
+                          avg_rooms + avg_bedrooms + avg_house_pop + long
+                          + lat, data = CAH_train,
+                          importance = TRUE)
+# shows out-of-bag MSE as a function of the number of trees used
+plot(CAH_forest)
+#Forest Prediction for price given location
+partialPlot(CAH_forest, as.data.frame(CAH_test), long, las=1)
+partialPlot(CAH_forest, as.data.frame(CAH_test), lat, las=1)
+```
+
+## General Boosted Regression Model
+
+We make a build set and a check set to adjust parameters.
+
+```{r, echo=FALSE, warning = FALSE, message=FALSE}
+CAH_train_split = initial_split(CAH_train)
+CAH_boost_build = training(CAH_train_split)
+CAH_boost_check = testing(CAH_train_split)
+CAH_boost1 = gbm(medianHouseValue ~ housingMedianAge + medianIncome +
+                     avg_rooms + avg_bedrooms + avg_house_pop + long
+                     + lat, data = CAH_boost_build,
+              interaction.depth=11, n.trees=1000, shrinkage=.08)
+ 
+CAH_boost2 = gbm(medianHouseValue ~ housingMedianAge + medianIncome +
+                    avg_rooms + avg_bedrooms + avg_house_pop + long
+                  + lat, data = CAH_boost_build,
+                     interaction.depth=14, n.trees=1000, shrinkage=.08)
+CAH_boost3 = gbm(medianHouseValue ~ housingMedianAge + medianIncome +
+                   avg_rooms + avg_bedrooms + avg_house_pop + long
+                 + lat, data = CAH_train,
+                    interaction.depth=12, n.trees=1000, shrinkage=.08)
+rmse(CAH_boost1, CAH_boost_check)
+rmse(CAH_boost2, CAH_boost_check)
+rmse(CAH_boost3, CAH_boost_check)
+```
+After adjusting the parameters, we conclude that the interaction depth of 12 is most optimal.
+
+## Plot of predictions for y given location 
+
+```{r, echo=FALSE, fig.show=FALSE }
+p1 = pdp::partial(CAH_boost3, pred.var = 'long', n.trees=1000)
+ggplot(p1) + geom_point(mapping=aes(x=long, y=yhat))
+p2 = pdp::partial(CAH_boost3, pred.var = 'lat', n.trees=1000)
+ggplot(p2) + geom_point(mapping=aes(x=lat, y=yhat))
+```
+As a comparison, we also added a linear model.
+
+## Linear model
+
+```{r, echo=FALSE}
+CAH_lm = lm(data = CAH_train, medianHouseValue ~ housingMedianAge + medianIncome +
+              avg_rooms + avg_bedrooms + avg_house_pop + long
+            + lat )
+CAH_stepwise = stepAIC(CAH_lm, direction = "both", 
+                        trace = FALSE)
+summary(CAH_stepwise)
+```
+Finally we compared the out-of-sample error for the 3 approaches against our test set.
+
+## RMSE test
+
+```{r, echo=FALSE}
+rmse(CAH_boost3, CAH_test)
+rmse(CAH_forest, CAH_test)
+rmse(CAH_lm, CAH_test)
+```
+After comparing RMSE values between GBM, RandomForest and linear models, the lowest RMSE value belongs to our GBM model. 
+
+GBM That will act as our best predictive model, which provided the following results.
+
+## Plot of the Original Data
+```{r, echo=FALSE}
+ca_data <- map_data("state", region = "california")
+california_map <- ggplot(ca_data, aes(x = long, y = lat, group = group)) +
+  geom_polygon(fill = "grey50", color = "white") +
+  theme_void()
+colnames(CAH)[c(1, 2)] <- c("long", "lat") 
+CAH_MedianHouseValue = CAH[c(1,2,9)]
+california_MedianHouseValue <- ggplot() +
+  geom_polygon(data = ca_data, aes(x = long, y = lat, group = group), fill = "white", color = "black") +
+  geom_tile(data = CAH_MedianHouseValue, aes(x = long, y = lat, fill = medianHouseValue), alpha = 1) +
+  scale_fill_gradient(low = "blue", high = "red") +
+  coord_equal() +
+  labs(title = "California Median House Value Map", fill = "Median House Value")
+california_MedianHouseValue
+```
+
+
+## Plot of our best Prediction Model
+```{r, echo=FALSE}
+colnames(CAH_test)[c(1, 2)] <- c("long", "lat")
+CAH_MedianHouseValue_test = CAH_test[c(1,2,9)] %>%
+  mutate(ln_medianHouseValue = log(medianHouseValue))
+california_MedianHouseValue_GBM <- ggplot() +
+  geom_polygon(data = ca_data, aes(x = long, y = lat, group = group), fill = "white", color = "black") +
+  geom_tile(data = CAH_MedianHouseValue_test, aes(x = long, y = lat, color = medianHouseValue), alpha = 1) +
+  scale_fill_gradient(low = "blue", high = "red") +
+  coord_equal() +
+  labs(title = "Predictive California Median House Value Map", fill = "Median House Value")
+california_MedianHouseValue_GBM
+```
+
+
+## Error/residuals Plot
+
+
+```{r, echo=FALSE, warning=FALSE}
+CAH_MedianHouseValue_test = CAH_MedianHouseValue_test %>%
+  mutate(value_predgbm = predict(CAH_boost3, CAH_test, n.trees = 1000),pred_errorgbm=(medianHouseValue-value_predgbm)^2) 
+CAH_MedianHouseValue_test = CAH_MedianHouseValue_test %>%
+  mutate(sqpred_errorgbm=sqrt(pred_errorgbm))
+california_MedianHouseValue_ErrorGBM <- ggplot() +
+  geom_polygon(data = ca_data, aes(x = long, y = lat, group = group), fill = "white", color = "black") +
+  geom_tile(data = CAH_MedianHouseValue_test, aes(x = long, y = lat, color = sqpred_errorgbm), alpha = 1) +
+  scale_fill_gradient(low = "lightblue", high = "red") +
+  coord_equal() +
+  labs(title = "Error/Residual Map")
+california_MedianHouseValue_ErrorGBM
+```
